@@ -1,0 +1,629 @@
+---
+title: "Breast Cancer Image Classification"
+author: "cristian razo"
+date: "6/8/2022"
+output:
+  pdf_document:
+    toc: yes
+  html_document:
+    toc: yes
+    toc_float: yes
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+library(gridExtra)
+library(ggplot2)
+library(tidyverse)
+library(tidymodels)
+library(corrplot)
+library(ggthemes)
+library(dplyr)
+library(MASS)
+library(janitor)
+knitr::opts_chunk$set(echo = TRUE,message=FALSE,warning = FALSE)
+```
+
+## Goal
+
+The goal of this project is to make a model to predict whether a patient will be diagnosed malignant (cancer) or benign (not cancer). Based on the breast cancer wisconsin data set that describes the characteristics of the patients cell nuclei.
+
+## Overview of the dataset
+
+The dataset that I will be working on is known as "Breast Cancer Wisconsin Data Set".The data set is a description of the characteristics of the cell nuclei present in an image. I will be accessing this data set from the website kaggle where they allow people to download the breast cancer csv. The dataset consist of the 32 columns with 569 instances/observations and none of the rows have any missing values.This data set has 31 predictor variables and 1 response variable which is diagnosis of the breast tissue.
+
+Website : <https://www.kaggle.com/datasets/uciml/breast-cancer-wisconsin-data>
+
+## Why should we construct a diagnosis classification
+
+I decided to construct this classifciation model for inferential and preditcive purposes. If I am able to construct a classification model that has a high accuracy of predicting which patient has cancer. This will benefit in cutting man hours and also to be used in hospital as a second pair of doctor eyes . With a high accuracy rate we can also look in great depth at our features and understand the relationship they have with the response variable.The inferential part will help doctors understand the important factors and its relationship with the response variable . This can help doctors look at certain features to make assumptions and correlations of what might cause a patient to get cancer.Finding the root cause can help alert cancer patient in the early stages and save more lives.
+
+## Key variables and Packages used
+
+The packages we used in loading our data , creating our model , and data visualization
+
+#### Packages
+
+$Tidyverse$ : opinionated collection of R packages designed for data science
+
+$Tidymodels$: packages for modeling and machine learning using tidyverse principles
+
+$MASS$: engine used for classification
+
+$dplyr$ : a structure of data manipulation
+
+$ggplot2$: open-source data visualization package
+
+#### Key Variable
+
+The key variables I used to construct my classification model.I will explain why I used these features later in my report.
+
+#### Response Variable
+
+$diagnosis$ :The diagnosis of breast tissues (M = malignant, B = benign) M=cancer B=no cancer
+
+#### Predictor Variable
+
+$texture\_mean$ : standard deviation of gray-scale values
+
+$radius\_mean$ : mean of distances from center to points on the perimeter
+
+$perimeter\_mean$ : mean size of the core tumor
+
+$area\_mean$ : The mean area of nuclei space
+
+$compactness\_mean$ : mean of perimeter\^2 / area - 1.0
+
+$concavity\_mean$ : mean of severity of concave portions of the contour
+
+*\*Code book provided in files*
+
+## Data Loading and Cleaning
+
+Loading in our data and factoring the response variable diagnosis into its two levels .
+
+```{r}
+dt=read.csv("~/Desktop/Final_project_131/Data/unprocessed/data.csv") %>%
+                                      mutate(diagnosis = factor(diagnosis, levels = c("M", "B")))
+```
+
+We checked our columns variable type .There is only one factor variable and the rest are numerical. Also cleaned our column names so that the syntax can run more smoothly.
+
+```{r}
+str(dt)
+dt <- dt %>% 
+  clean_names()
+```
+
+The data set is from kaggle and it has no missing values . There was not much cleaning to do to our dataset because it was given to us clean already.
+
+## Data Splitting
+
+The dataset is splitted into a training set and testing set . 80% of our data is in the training set leaving the remainder to be in the testing set. We stratified the sampling to resemble the population space of diagnosis and its levels.
+
+I didnt approach EDA until I am able to establish the training data set. I want find patterns and trend based on the observation that are in the training set .
+
+```{r}
+set.seed(69)
+split <- initial_split(dt, prop = 0.80, strata = diagnosis)
+train <- training(split)
+test <- testing(split)
+
+K_folds <- vfold_cv(train, strata = diagnosis, 
+                          v = 10)
+```
+
+The training data set has 454 observation while the testing data set has 115 observation. A K fold of 10 is also processed into a variable to be used later.
+
+The K fold is used for cross validation . Cross validation is a resampling method that uses different portons of the data to test and train a model on different iteration . Its a way to keep our testing not to be spoiled when trying to fit our models.
+
+## Exploratory Data Analysis
+
+Is there any relationship that will prove to be useful ? How does the cancer behave in terms of the cell nuclei ?
+
+I will answer these questions in my EDA to understand my data better .
+
+#### Correlation heatmap on the training set
+
+```{r}
+train_nu=select_if(train,is.numeric)
+
+## train correlation 
+
+train_nu %>% 
+  cor() %>% 
+  corrplot(type = "lower")
+```
+
+The heat map in detail tells us which columns are correlated with each other.We can see that there alot of significaly positive correlation. This tells us that many of the features are associated with each other. This can help us in reducing our dimension in our data frame and make it less complicated.
+
+#### Correlation heat map on the training set based on cancer type
+
+Seperated the training data set based on cancer type to see how the relationship founded differ from each other.
+
+```{r}
+M_nu=train_nu[train[2]=='M',]
+
+B_nu=train_nu[train[2]=='B',]
+```
+
+#### Correlation heatmap on Malignant patients
+
+```{r}
+M_nu %>% 
+  cor() %>% 
+  corrplot(type = "lower")
+
+```
+
+#### Correlation heatmap on Benign patients
+
+```{r}
+B_nu %>% 
+  cor() %>% 
+  corrplot(type = "lower")
+```
+
+The purpose of making a heat map for each cancer type is to check if they share the same relationships. The visualization shows us that Malignant has more positive significant correlation than Benign but Benign shows more negative significant correlations. Its best to look at these correlation in more depth so we can reduce the dimension in our data frame.
+
+#### Correlation in depth
+
+```{r}
+## see relationship look for reduce demnsion 
+
+M_c=M_nu%>%
+  cor() 
+
+B_c=B_nu%>%
+  cor() 
+```
+
+```{r}
+corr_M <- as.data.frame(as.table(M_c))
+#corr=corr[lower.tri(corr,diag=TRUE)] <- NA 
+corr_M=corr_M[!duplicated(corr_M$Freq), ]
+
+corr_B<- as.data.frame(as.table(B_c))
+#corr=corr[lower.tri(corr,diag=TRUE)] <- NA 
+corr_B=corr_B[!duplicated(corr_B$Freq), ]
+
+
+sig_m=corr_M %>%
+   filter(Freq>.7 )
+
+sig_b=corr_B %>%
+  filter(Freq>.7 )
+```
+
+```{r}
+sig_M2 = sig_m%>% group_by(Var2) %>% summarise(n=n())
+sig_B2 = sig_b%>% group_by(Var2) %>% summarise(n=n())
+
+```
+
+#### Significant correlation founded in Malignant by columns
+
+```{r}
+sig_M2 %>%
+  filter(n>1)
+
+```
+
+#### Significant correlation founded in Benign by columns
+
+```{r}
+sig_B2 %>%
+  filter(n>1)
+
+```
+
+Based on the tibble presented above I will reduce my model only to include radius mean ,perimeter mean , area mean ,compactness mean, concavity mean. I chose these variables because they positively represent other columns and information will not be lost when using them.
+
+```{r}
+c1=corr_M %>% filter(Freq<.20)
+
+c2=corr_B %>% filter(Freq<.20)
+
+sig_M2 = c1%>% group_by(Var2) %>% summarise(n=n())
+sig_B2 = c2%>% group_by(Var2) %>% summarise(n=n())
+
+```
+
+#### Insignificant correlation founded in Malignant by columns
+
+```{r}
+sig_M2 %>%
+  filter(n>1)
+```
+
+#### Insignificant correlation founded in Benign by columns
+
+```{r}
+sig_B2 %>%
+  filter(n>1)
+```
+
+I dont want to shy away from that share no correlation as these features can still prove to be informative. Based on the results founded I will include texture mean to be induced into my model along with the other features I named recently .
+
+In all together I am able to reduce my dimension from 32 columns to only 7 columns. This will help our model to be less complicated.
+
+-   Dataframe reduced to ; diagnosis ,texture_mean, radius mean ,perimeter mean , area mean ,compactness mean concavity mean.
+
+#### Scatter plots of high correlated pairs
+
+###### Malignant
+
+```{r}
+sig_m %>% filter(Freq>.98)
+```
+
+I found 5 relationship that have a really high correlation value. This means that they are very close in the way they act.
+
+###### Benign
+
+```{r}
+sig_b %>% filter(Freq>.98)
+```
+
+Same goes for the Benign there are 5 relationship that are high correlated . It be best to see their linear relationship of these features
+
+```{r}
+ggplot(train, aes(x =area_mean , y = radius_mean, colour = factor(diagnosis)))+ 
+  geom_point(size=2.5)+ ggtitle("Area_mean VS Radius_mean")
+
+ggplot(train, aes(x =area_mean , y = perimeter_mean, colour = factor(diagnosis)))+ 
+  geom_point(size=2.5) + ggtitle("Area_mean VS Perimeter_mean")
+
+
+ggplot(train, aes(x =area_worst , y = radius_worst, colour = factor(diagnosis)))+ 
+  geom_point(size=2.5)+ ggtitle("Area_worst VS Radius_worst")
+
+ggplot(train, aes(x =area_worst , y = texture_mean, colour = factor(diagnosis)))+ 
+  geom_point(size=2.5)+ ggtitle("Area_worst VS texture_mean")
+```
+
+The visualization of the scatter plot shows that they do have strong postive correlation. It also shows the grouping of the diagnosis. This means that diagnosis labels can be distinguished as theyre not always founded to be in the same population space.
+
+Benign is seen to always be located at the beginning of our scatter plot while Malignant is at at the far end . This could be useful to use for the inferential part of our model.
+
+#### Distribution of the observation collected
+
+```{r}
+train %>% 
+  ggplot(aes(x = radius_mean,colour=factor(diagnosis))) +
+  geom_histogram()+ ggtitle('Radius Mean Distribution')
+
+train %>% 
+  ggplot(aes(x = texture_mean,colour=factor(diagnosis))) +
+  geom_histogram()+ ggtitle('Texture Mean Distribution')
+
+train %>% 
+  ggplot(aes(x = area_mean,colour=factor(diagnosis))) +
+  geom_histogram()
+
+train %>% 
+  ggplot(aes(x = compactness_mean,colour=factor(diagnosis))) +
+  geom_histogram()
+
+```
+
+The visualization above shows that its distribution are right skewed and not approximating a normal distribution. The Benign population lies mostly on the lower end of the distribution. The Malignant population is spread out more evenly through out the distribution but still is on a right skewed form.
+
+## Model Building
+
+### Recipe Building and Tuning
+
+The recipe I created induces the predictor variable and response variable of my model. There's also a step we included to standarize and scale all our predictor variables by normalzing them.
+
+```{r}
+diagnosis_recipe <- recipe(diagnosis~texture_mean+radius_mean+perimeter_mean+area_mean+compactness_mean+concavity_mean, data = dt) %>%
+  step_normalize(all_predictors())
+
+
+```
+
+The predictor variables are texture_mean ,radius_mean ,perimeter_mean, area_mean,compactness_mean , concavity_mean.
+
+### Preparing and Fitting models
+
+I will now use the 10 k fold validation set to be used to fit the four classification models. The 4 models I chose are widely used for classification problems. Models :
+
+$Logestic$ $Regression$
+
+$Decission$ $Tree$
+
+$RandomForest$
+
+$Boosted$ $Trees$
+
+For each model I will assign them there engine and mode to be used in context to our goal. Based on the models Hyperparameter we will tune them in order to find the best parameter .Then add the model to the workflow that combines both our custom model and recipe to be used.
+
+[*Logistic regression model will have no tuning parameters. I received a syntax error that I couldnt resolve.*]{.ul}
+
+All of these models will fit onto a cross validation and will give us the mean accuracy and roc score achieved for the 10 folds we assigned earlier in data splitting
+
+#### Logestic Regression
+
+```{r}
+log_reg <- logistic_reg() %>% 
+  set_engine("glm") %>% 
+  set_mode("classification")
+
+log_wkflow <- workflow() %>% 
+  add_recipe(diagnosis_recipe) %>% 
+  add_model(log_reg)
+
+```
+
+Assigned the engine to be GLM and mode to classification
+
+#### Decision Tree
+
+```{r}
+tree_spec <- decision_tree() %>%
+  set_engine("rpart")
+class_tree_spec <- tree_spec %>%
+  set_mode("classification")
+
+auto_wrkflw2=workflow()%>%
+  add_recipe((diagnosis_recipe)) %>%
+  add_model(class_tree_spec %>% set_args(cost_complexity = tune())) 
+
+param_grid <- grid_regular(cost_complexity(range = c(-3, -1)), levels = 10)
+
+```
+
+Assigned the engine to be rpart and mode to be classification. We tune only the cost complexity parameters at only 10 levels
+
+#### Random Forest
+
+```{r}
+rf_spec <- rand_forest(mtry = tune(),trees=tune(),min_n=tune())%>%
+  set_engine("ranger", importance = 'impurity') %>%
+  set_mode("classification")
+
+
+auto_wrkflw3=workflow()%>%
+  add_recipe((diagnosis_recipe)) %>%
+  add_model(rf_spec)
+
+grid_pen=grid_regular(mtry(range = c(1,6)),trees(range = c(1,10)),min_n(range = c(1,10)),
+                      levels =6)
+```
+
+Assigned the engine to be ranger and mode to be classification. The parameters that will be tuned are mtry , trees , and min_n . It must be between 1-6 for mtry because we have 6 predictors in our model.
+
+#### Boosted trees
+
+```{r}
+boost_spec <- boost_tree(trees = tune() )%>%
+  set_engine("xgboost") %>%
+  set_mode("classification")
+
+
+
+auto_wrkflw4=workflow()%>%
+  add_recipe((diagnosis_recipe)) %>%
+  add_model(boost_spec)
+
+grid_trees=grid_regular(trees(range = c(10,2000)),levels =10)
+```
+
+Assigned the engine to be xgboost and mode to be classification.The parameter being tuned is trees from (10-2,000).
+
+### Fitting our models
+
+I will fit all the models I created above. We will fit them onto our K folds to do cross validation before we fit it onto our testing and training set .
+
+The reason for the cross validation is to find the best hyper parameters and to not spoil our testing set.
+
+```{r}
+## logestic regression model 
+
+log_fit=fit_resamples(log_wkflow,K_folds)
+
+
+## DT model
+tune_res2 <- tune_grid(
+  auto_wrkflw2, 
+  resamples = K_folds, 
+  grid = param_grid,
+  metrics = metric_set(roc_auc,accuracy)
+)
+
+## RF model 
+tune_res3=tune_grid(
+  object = auto_wrkflw3,
+  resamples = K_folds,
+  grid = grid_pen,
+  metrics = metric_set(roc_auc,accuracy)
+)
+
+
+## Boosting model 
+tune_res4=tune_grid(
+  object = auto_wrkflw4,
+  resamples = K_folds,
+  grid = grid_trees,
+  metrics = metric_set(roc_auc,accuracy)
+)
+
+
+
+```
+
+### Analyzation on Performance models
+
+Now that we fitted out model to the K folds it is now time to analyze there performances along with the tuning involved. The visualization lets us see how well are model is fitted based on the tuning parameters.
+
+##### Decision Tree Performance
+
+```{r}
+autoplot(tune_res2)
+
+```
+
+A Decision Tree with low complexity value will fit the best . A low complexity value results in high accuracy score and a high ROC as well
+
+##### Random Forest Performance
+
+```{r}
+autoplot(tune_res3)
+```
+
+A Random forest with high number of trees will fit the best.A high tree count results in high accuracy score and a high ROC as well .
+
+#### Boosting Trees Performance
+
+```{r}
+autoplot(tune_res4)
+```
+
+A Random forest with high number of trees will fit the best.A high tree count results in high accuracy score and a high ROC as well .
+
+### Select the best tuned parameters based on ROC scoring metric .
+
+I will now select the models parameter with highest ROC score to be considrered as the best model. I will use the best model to fit it on the whole training set and see how it performs.
+
+```{r}
+
+metrics_2=collect_metrics(tune_res2)
+best2=select_best(tune_res2)
+best2
+```
+
+**Decision tree best parameters :**
+
+-   Cost complexity =.001
+
+```{r}
+metrics_3=collect_metrics(tune_res3)
+best3=select_best(tune_res3)
+best3
+```
+
+**Random Forest best parameters :**
+
+-   Mtry =1
+
+-   Tress =10
+
+-   Min_n=6
+
+```{r}
+metrics_4=collect_metrics(tune_res4)
+best4=select_best(tune_res4)
+best4
+```
+
+**Boosted Trees** :
+
+-   Trees =452
+
+### Fit the best models to the training set
+
+Based on my models best hyper parameters . I will fit them onto my training set and check how well it performed.
+
+##### Log fit and accuracy
+
+```{r}
+log_fit2=fit(log_wkflow,train)
+
+predict(log_fit2, new_data = train, type = "class") %>% 
+  bind_cols(train) %>% 
+  accuracy(truth = diagnosis, estimate = .pred_class)
+
+```
+
+##### Decision Tree fit and accuracy
+
+```{r}
+DT_final=finalize_workflow(auto_wrkflw2,best2)
+
+DT_fit=fit(DT_final,train)
+
+predict(DT_fit, new_data = train, type = "class") %>% 
+  bind_cols(train) %>% 
+  accuracy(truth = diagnosis, estimate = .pred_class)
+```
+
+##### Random Forest fit and accuracy
+
+```{r}
+RF_final=finalize_workflow(auto_wrkflw3,best3)
+
+RF_fit=fit(RF_final,train)
+
+predict(RF_fit, new_data = train, type = "class") %>% 
+  bind_cols(train) %>% 
+  accuracy(truth = diagnosis, estimate = .pred_class)
+```
+
+##### Boosting fit and accuracy
+
+```{r}
+Boost_final=finalize_workflow(auto_wrkflw4,best4)
+
+Boost_fit=fit(Boost_final,train)
+
+predict(Boost_fit, new_data = train, type = "class") %>% 
+  bind_cols(train) %>% 
+  accuracy(truth = diagnosis, estimate = .pred_class)
+```
+
+All models performed really well all showing accuracy higher than 90%. The model that received the highest score is the Boosting Tree. I remember in class we talked about how Tree based models always produce the best results and always ends up as the optimal one to use. This is proof that the theory we discuss in class is true.
+
+### Fitting the best models into the testing set
+
+Now that I have fitted our model onto our cross validation data set and chose the model with the best parameters. I fitted the best models onto the the training set and now we arrive at training our data set
+
+```{r}
+log_final_fit=fit(log_wkflow,test)
+predict(log_final_fit, new_data = test, type = "class") %>% 
+  bind_cols(test) %>% 
+  accuracy(truth = diagnosis, estimate = .pred_class)
+```
+
+```{r}
+DT_final_fit=fit(DT_final,test)
+
+predict(DT_final_fit, new_data = test, type = "class") %>% 
+  bind_cols(test) %>% 
+  accuracy(truth = diagnosis, estimate = .pred_class)
+```
+
+```{r}
+RF_final_fit=fit(RF_final,test)
+
+predict(RF_final_fit, new_data = test, type = "class") %>% 
+  bind_cols(test) %>% 
+  accuracy(truth = diagnosis, estimate = .pred_class)
+```
+
+```{r}
+Boost_final_fit=fit(Boost_final,test)
+
+predict(Boost_final_fit, new_data = test, type = "class") %>% 
+  bind_cols(test) %>% 
+  accuracy(truth = diagnosis, estimate = .pred_class)
+```
+
+All models achieved high accuracys . The best model is still the Boosted tree model. The performance of the boosted model is 100% accuracy. Boosted model is the best model to use for this classification project.
+
+#### Best model overall 
+
+The model that fit our model the best is the boosting tree with the parameter of tree set at 452. It was able to achieve an accuracy score of 1. This image classification problem is best suited to be used in a boosting tree model.The quality of the predictions is very high .
+
+## Conclusion
+
+The goal I set for this project can open the door for doctors in understanding breast cancer. I was able to achieve a really high accuracy score for all my models of choice .
+
+The model that fitted the data set the best is the Boosted Tree model . The model achieve 100% for both the training and testing data set.The models hyper parameter is 452 trees.
+
+For this project that deals with classification I used a logistic regression model , decision tree model , random forest model , and a boosting tree model. I chose these models because in the discussion we have in lecture Tree based model always works the best for classification. This is evidence that it is true . All models were able to achieve an accuracy score over 90% when we fit it onto our training and testing data set. The K fold cross validation with the tuning helped us find the best optimal model that fitted our data the best.
+
+I was surprised with my models performance because I didnt think any of my models would achieve such high accuracy score . When I started this project my goal was to hit at least 80% accuracy score and all my models beat that threshold . It surprised me how well the model were able to fit my data even when I reduce the dimension .
+
+The next step would be the inferential part. Now that I created a model with such high accuracy score we are able find relationship between features.By finding trend and patterns that affect predictor variables will allows us to understand cancer better . Being able to understand the features relationship in response to the predictor variables will illustrate key points to look at .The key points can help point out early or on the rise cancer patient and save lives.
+
+Overall , I enjoyed working on this project . It let me explored the health care side of data science . I have now done a project using industry data , research data , and no healthcare data . The project helped me add more stuff to my portfolio and have better judgement in creating these models.
